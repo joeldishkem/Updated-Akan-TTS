@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Asante Twi TTS Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <div class="card">
+        <h1>Asante Twi TTS Demo</h1>
+        <div class="meta">Asante Twi Text-to-Speech · Fine-Tuned VoxCPM2 Demo</div>
+
+        <div>
+          <label for="backendUrl">Python Inference Endpoint URL</label>
+          <input
+            id="backendUrl"
+            type="url"
+            placeholder="https://your-space.hf.space/synthesize"
+            value=""
+          />
+        </div>
+
+        <div class="section-gap">
+          <label for="twiInput">Asante Twi Sentence</label>
+          <textarea id="twiInput" placeholder="Enter an Asante Twi sentence...">Mema wo akye. Wo ho te sɛn?</textarea>
+          <div class="keypad" aria-label="Akan special characters">
+            <button type="button" class="chip-btn" data-char="ɛ">ɛ</button>
+            <button type="button" class="chip-btn" data-char="Ɛ">Ɛ</button>
+            <button type="button" class="chip-btn" data-char="ɔ">ɔ</button>
+            <button type="button" class="chip-btn" data-char="Ɔ">Ɔ</button>
+            <button type="button" class="chip-btn" data-char="ŋ">ŋ</button>
+            <button type="button" class="chip-btn" data-char="ɲ">ɲ</button>
+          </div>
+        </div>
+
+        <div>
+          <label>Unseen Evaluation Sentences</label>
+          <div class="prompts">
+            <button type="button" class="chip-btn" data-prompt="Mema wo akye. Wo ho te sɛn?">Greeting</button>
+            <button type="button" class="chip-btn" data-prompt="Me din de Kofi, na mete Kumasi.">Introduction</button>
+            <button type="button" class="chip-btn" data-prompt="Ɔkyena anɔpa no, yɛbɛkɔ dwam akɔtɔ bayerɛ ne nsuo.">Market</button>
+            <button type="button" class="chip-btn" data-prompt="Nsuo retɔ nti, fa kyiniiɛ no bra fie.">Weather</button>
+            <button type="button" class="chip-btn" data-prompt="Yɛda mo nyinaa ase sɛ mobaa yɛn afahyɛ no ase.">Gratitude</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="generateBtn" class="primary">Generate Speech</button>
+          <button type="button" id="healthBtn" class="secondary">Test Backend</button>
+        </div>
+
+        <div id="statusBox" class="status" role="status"></div>
+
+        <div id="playerBox" class="player-box">
+          <label for="audioPlayer">Generated Twi Audio</label>
+          <audio id="audioPlayer" controls></audio>
+          <div class="actions">
+            <a id="downloadLink" class="secondary" download="asante_twi_speech.wav">Download WAV</a>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const backendInput = document.getElementById("backendUrl");
+      const twiInput = document.getElementById("twiInput");
+      const generateBtn = document.getElementById("generateBtn");
+      const healthBtn = document.getElementById("healthBtn");
+      const statusBox = document.getElementById("statusBox");
+      const playerBox = document.getElementById("playerBox");
+      const audioPlayer = document.getElementById("audioPlayer");
+      const downloadLink = document.getElementById("downloadLink");
+
+      let currentBlobUrl = null;
+
+      function showStatus(message, type) {
+        statusBox.textContent = message;
+        statusBox.className = "status " + type;
+      }
+
+      document.querySelectorAll("[data-char]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const ch = btn.getAttribute("data-char");
+          const start = twiInput.selectionStart || 0;
+          const end = twiInput.selectionEnd || 0;
+          twiInput.value = twiInput.value.slice(0, start) + ch + twiInput.value.slice(end);
+          twiInput.focus();
+          twiInput.setSelectionRange(start + ch.length, start + ch.length);
+        });
+      });
+
+      document.querySelectorAll("[data-prompt]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          twiInput.value = btn.getAttribute("data-prompt");
+          twiInput.focus();
+        });
+      });
+
+      healthBtn.addEventListener("click", async () => {
+        const url = backendInput.value.trim();
+        if (!url) {
+          showStatus("Please enter your Python backend URL first.", "error");
+          return;
+        }
+        const healthUrl = url.replace(/\/(synthesize|tts)\/?$/, "/health");
+        try {
+          const res = await fetch(healthUrl);
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          showStatus("Connected to backend (" + healthUrl + ").", "ok");
+        } catch (err) {
+          showStatus("Backend unavailable at " + healthUrl + ": " + err.message, "error");
+        }
+      });
+
+      generateBtn.addEventListener("click", async () => {
+        const url = backendInput.value.trim();
+        const text = twiInput.value.trim();
+
+        if (!url) {
+          showStatus("No backend URL configured. Connect a FastAPI or Hugging Face Spaces endpoint first.", "error");
+          return;
+        }
+        if (!text) {
+          showStatus("Please enter an Asante Twi sentence.", "error");
+          return;
+        }
+
+        generateBtn.disabled = true;
+        generateBtn.textContent = "Generating...";
+        statusBox.className = "status";
+
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error("HTTP " + res.status + (errText ? " — " + errText.slice(0, 160) : ""));
+          }
+          const blob = await res.blob();
+          if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+          currentBlobUrl = URL.createObjectURL(blob);
+          audioPlayer.src = currentBlobUrl;
+          downloadLink.href = currentBlobUrl;
+          playerBox.style.display = "block";
+          showStatus("Speech generated successfully (" + Math.round(blob.size / 1024) + " KB).", "ok");
+        } catch (err) {
+          showStatus("Unable to reach TTS backend: " + err.message, "error");
+        } finally {
+          generateBtn.disabled = false;
+          generateBtn.textContent = "Generate Speech";
+        }
+      });
+    </script>
+  </body>
+</html>
